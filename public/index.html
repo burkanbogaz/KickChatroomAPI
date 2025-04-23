@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kick Chatroom Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Kick.com Chatroom Monitor</h1>
+      <p>Monitor and receive messages from any Kick.com chatroom</p>
+    </header>
+    
+    <div class="monitor-controls">
+      <div class="input-group">
+        <input type="text" id="channel-name" placeholder="Enter channel name (e.g. xqc)">
+        <button id="start-monitor">Start Monitoring</button>
+        <button id="stop-monitor" disabled>Stop Monitoring</button>
+      </div>
+      
+      <div class="status-display">
+        <div id="connection-status">Not connected</div>
+        <div id="message-count">0 messages</div>
+      </div>
+    </div>
+    
+    <div class="chat-container">
+      <div class="channel-select">
+        <h3>Active Channels:</h3>
+        <select id="channel-select">
+          <option value="">Select a channel...</option>
+        </select>
+      </div>
+      
+      <div class="messages-container">
+        <h3>Chat Messages:</h3>
+        <div id="messages" class="message-list"></div>
+      </div>
+    </div>
+    
+    <div class="api-info">
+      <h3>API Endpoints:</h3>
+      <ul>
+        <li><strong>GET /api/info</strong> - Get server status and active channels</li>
+        <li><strong>GET /api/messages/:channelName</strong> - Get all messages for a channel</li>
+        <li><strong>POST /api/monitor</strong> - Start monitoring a channel (body: {channelName: "name"})</li>
+        <li><strong>POST /api/unmonitor</strong> - Stop monitoring a channel (body: {channelName: "name"})</li>
+      </ul>
+    </div>
+  </div>
+  
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html> 
