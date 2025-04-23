@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentChannel = '';
   let messageCount = 0;
   
+  
   // DOM Elements
   const channelNameInput = document.getElementById('channel-name');
   const startMonitorBtn = document.getElementById('start-monitor');

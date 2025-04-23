@@ -52,9 +52,21 @@ function isValidKickEvent(eventName) {
 }
 
 class KickChatClient extends EventEmitter {
-  constructor(channelName) {
+  constructor(channelNameOrId) {
     super();
-    this.channelName = channelName;
+    
+    // Eğer sayı veya ID formunda bir değer girildiyse, doğrudan chatroom ID olarak kullan
+    if (/^\d+$/.test(channelNameOrId)) {
+      // Sayısal bir ID girilmiş, doğrudan chatroom ID olarak kabul et
+      this.chatroomId = channelNameOrId;
+      this.channelName = `ID-${channelNameOrId}`; // Gösterim amaçlı 
+      console.log(`📌 Doğrudan Chatroom ID kullanılıyor: ${this.chatroomId}`);
+    } else {
+      // Normal kanal adı girilmiş
+      this.channelName = channelNameOrId;
+      this.chatroomId = null; // API'den alınacak
+    }
+    
     this.ws = null;
     this.connected = false;
     this.reconnectAttempts = 0;
@@ -65,14 +77,64 @@ class KickChatClient extends EventEmitter {
     this.clusterIndex = 0; // Farklı cluster'ları denemek için
     this.eventTypes = new Set(); // Görülen event tiplerini takip et
     this.debugMode = true; // Ayrıntılı loglama
-    this.chatroomId = null; // Gerçek chatroomId'yi saklarız
     this.lastKeepAliveTime = Date.now();
     this.keepAliveInterval = null;
   }
 
   async connect() {
     try {
-      console.log(`Trying to connect to chatroom for ${this.channelName}`);
+      console.log(`\n==================================================`);
+      console.log(`📢 KANAL BAĞLANTI BAŞLATILIYOR: "${this.channelName}"`);
+      console.log(`==================================================\n`);
+
+      // İlk olarak chatroom ID'yi tespit et (eğer constructor'da belirtilmediyse)
+      if (!this.chatroomId) {
+        try {
+          this.chatroomId = await this.getChatroomId(this.channelName);
+          console.log(`\n🎯 CHATROOM ID TESPİT EDİLDİ: ${this.chatroomId}`);
+          console.log(`📌 KANAL ADI: ${this.channelName}`);
+          console.log(`📌 HEDEF CHATROOM ID: ${this.chatroomId}`);
+          console.log(`📌 HEDEF KANAL: chatrooms.${this.chatroomId}.v2\n`);
+        } catch (idError) {
+          console.error(`\n❌ CHATROOM ID TESPİT HATASI!`);
+          console.error(`❌ HATA: ${idError.message}\n`);
+          
+          // CloudFlare engeline takıldığında manuel ID desteği
+          if (idError.message.includes('403')) {
+            console.log(`\n⚠️ API'ye erişim engellendi. Manuel ID denemesi yapılabilir.`);
+            
+            // İyi bilinen bazı kanal ID'leri
+            const knownChannelIds = {
+              'xqc': '25911944',  // xQc kanalı
+              'asmongold': '25578458', // Asmongold kanalı
+              'bukidev': '27670567', // BukiDev kanalı
+              'b0aty': '26770211'  // b0aty kanalı
+            };
+            
+            // Kanal adı bilinen bir kanal mı kontrol et
+            if (knownChannelIds[this.channelName.toLowerCase()]) {
+              this.chatroomId = knownChannelIds[this.channelName.toLowerCase()];
+              console.log(`\n✅ BİLİNEN KANAL LİSTESİNDEN ID BULUNDU: ${this.chatroomId}`);
+              console.log(`📌 KANAL ADI: ${this.channelName}`);
+              console.log(`📌 HEDEF CHATROOM ID: ${this.chatroomId}`);
+              console.log(`📌 HEDEF KANAL: chatrooms.${this.chatroomId}.v2\n`);
+            } else {
+              throw new Error(`Kanal ID'si alınamadı ve bilinen kanallar listesinde bulunamadı: ${this.channelName}`);
+            }
+          } else {
+            throw idError;
+          }
+        }
+      } else {
+        // Zaten bir chatroom ID mevcut (constructor'da belirtilmiş)
+        console.log(`\n✅ CHATROOM ID ZATEN BELİRTİLMİŞ: ${this.chatroomId}`);
+        console.log(`📌 KANAL ADI: ${this.channelName}`);
+        console.log(`📌 HEDEF KANAL: chatrooms.${this.chatroomId}.v2\n`);
+      }
+
+      if (!this.chatroomId) {
+        throw new Error(`Could not detect chatroom ID for ${this.channelName}. Connection attempt aborted.`);
+      }
 
       // SADECE TARAYICIDAN GÖRÜLEN GERÇEK URL KULLANILACAK
       // Tam olarak tarayıcıdan kopyalandığı şekilde URL kullan
@@ -85,14 +147,13 @@ class KickChatClient extends EventEmitter {
 
       this.ws.on('open', () => {
         this.connected = true;
-        console.log(`WebSocket bağlantısı açıldı!`);
+        console.log(`\n✅ WEBSOCKET BAĞLANTISI KURULDU!`);
 
-        // SADECE BROWSERDA GÖRÜLEN KANAL ADINIZ KULLANIN
-        // Bu kanal adı tarayıcıda görünen formatta olmalı (chatrooms.25911944.v2)
-        // Örneğin "chatrooms.25911944.v2" gibi
-        const channelName = `chatrooms.25911944.v2`; // ÖNEMLI: Bu numarayı kendi chatroom id'nizle değiştirin!
+        // Dinamik olarak oluşturulan chatroom kanalını kullan
+        const channelName = `chatrooms.${this.chatroomId}.v2`;
         
-        console.log(`Subscribing to exact channel: ${channelName}`);
+        console.log(`\n📣 ABONE OLUNUYOR: "${channelName}"`);
+        console.log(`📡 Chatroom: ${this.channelName} (ID: ${this.chatroomId})`);
         
         // Subscribe Payload - tarayıcıdan görülen formatta
         const subscribePayload = JSON.stringify({
@@ -104,8 +165,13 @@ class KickChatClient extends EventEmitter {
         });
         
         // Kanal abone isteği gönder
-        this.ws.send(subscribePayload);
-        console.log(`Subscribe isteği gönderildi: ${subscribePayload}`);
+        try {
+          this.ws.send(subscribePayload);
+          console.log(`✅ ABONE OLMA İSTEĞİ GÖNDERİLDİ`);
+          console.log(`📦 Gönderilen veri: ${subscribePayload}`);
+        } catch (sendError) {
+          console.error(`❌ ABONE OLMA İSTEĞİ GÖNDERİLİRKEN HATA OLUŞTU:`, sendError);
+        }
         
         // KeepAlive mekanizması başlat
         this.startKeepAlive();
@@ -119,7 +185,7 @@ class KickChatClient extends EventEmitter {
           const rawData = data.toString();
           
           // Her mesajı ham olarak logla
-          console.log(`\n\n=================== RAW WEBSOCKET MESSAGE ===================`);
+          console.log(`\n\n=================== WEBSOCKET MESAJI ALINDI ===================`);
           console.log(rawData);
           console.log(`============================================================\n\n`);
           
@@ -132,7 +198,7 @@ class KickChatClient extends EventEmitter {
           
           // ChatMessageEvent ile gelen mesajları yakalamak için özel işlem
           if (parsedData.event === 'App\\Events\\ChatMessageEvent') {
-            console.log('✅ CHAT MESSAGE DETECTED!');
+            console.log('✅ CHAT MESAJI ALINDI!');
             
             try {
               // Event data'sını parse et (string olarak geliyor)
@@ -222,32 +288,35 @@ class KickChatClient extends EventEmitter {
                 };
                 
                 // Mesaj detaylarını göster
-                console.log(`👤 From: ${chatMessage.sender.username || 'Unknown'}`);
-                console.log(`💬 Message: ${chatMessage.content}`);
-                console.log(`⏰ Time: ${chatMessage.created_at}`);
-                console.log(`ID: ${chatMessage.id}`);
+                console.log(`\n------ CHAT MESAJI DETAYLARI ------`);
+                console.log(`👤 GÖNDEREN: ${chatMessage.sender.username || 'Bilinmiyor'}`);
+                console.log(`💬 MESAJ: ${chatMessage.content}`);
+                console.log(`⏰ ZAMAN: ${chatMessage.created_at}`);
+                console.log(`🆔 MESAJ ID: ${chatMessage.id}`);
+                console.log(`----------------------------------\n`);
                 
                 // Mesajı yayınla
                 this.emit('message', chatMessage);
               }
             } catch (error) {
-              console.error('Error processing ChatMessageEvent:', error);
+              console.error('❌ Chat mesajı işlenirken hata oluştu:', error);
             }
           } 
           // Pusher subscription mesajı
           else if (parsedData.event === 'pusher_internal:subscription_succeeded') {
-            console.log(`✅ Successfully subscribed to channel!`);
+            console.log(`\n✅ KANALA BAŞARIYLA ABONE OLUNDU! (${parsedData.channel || 'kanal bilgisi yok'})`);
             this.emit('message', {
               id: `system-${Date.now()}`,
-              content: `Successfully connected to chatroom. Now listening for messages...`,
-              sender: { username: 'System' },
+              content: `Chatroom'a başarıyla bağlanıldı. Mesajlar dinleniyor...`,
+              sender: { username: 'Sistem' },
               created_at: new Date().toISOString(),
               type: 'system'
             });
           }
           // Diğer tüm mesajlar için basit log
           else {
-            console.log(`📢 Event: ${parsedData.event}`);
+            console.log(`📢 OLAY: ${parsedData.event || 'Olay adı yok'}`);
+            console.log(`📦 VERİ: ${JSON.stringify(parsedData.data || {}).substring(0, 300)}...`);
             
             // Event tipini kaydet
             if (parsedData.event) {
@@ -329,147 +398,139 @@ class KickChatClient extends EventEmitter {
     }, 30000); // 30 saniyede bir kontrol et
   }
 
-  // Kick.com'daki HTML'den chatroom bilgilerini alma
-  async scrapeKick(channelName) {
+  // Kanal adından chatroom ID'yi almak için API kullanan fonksiyon
+  async getChatroomId(channelName) {
     try {
-      console.log('Trying direct HTML scraping approach...');
+      console.log(`\n📡 "${channelName}" için Kick.com API sorgusu yapılıyor...`);
       
-      // User agent'ı gerçek bir Chrome tarayıcısı gibi ayarlayarak bulunmayı zorlaştır
-      const response = await axios.get(`https://kick.com/${channelName}`, {
+      // API'den kanal bilgilerini al (tarayıcı gibi davranarak)
+      const response = await axios.get(`https://kick.com/api/v2/channels/${channelName}`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'max-age=0',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
+          'Cache-Control': 'no-cache',
+          'DNT': '1',
+          'Origin': 'https://kick.com',
+          'Referer': `https://kick.com/${channelName}`,
           'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
           'Sec-Ch-Ua-Mobile': '?0',
           'Sec-Ch-Ua-Platform': '"macOS"',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
-          'Upgrade-Insecure-Requests': '1'
-        }
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin'
+        },
+        withCredentials: true,
+        timeout: 10000
       });
       
-      // HTML içeriğinden gerekli bilgileri çıkaralım
-      const html = response.data;
+      // API yanıtını kontrol et
+      console.log(`\n✅ API yanıtı alındı (HTTP ${response.status})`);
       
-      console.log('Successfully fetched HTML from Kick.com');
-      
-      // Pusher app key'i alalım (eğer değiştiyse)
-      const pusherKeyMatch = html.match(/pusher[\s]*:[\s]*{[^}]*key[\s]*:[\s]*['"]([^'"]+)['"]/i);
-      if (pusherKeyMatch && pusherKeyMatch[1]) {
-        console.log(`Found Pusher key in HTML: ${pusherKeyMatch[1]}`);
-        PUSHER_CONFIG.key = pusherKeyMatch[1]; // Global konfigürasyonu güncelle
-      }
-      
-      // Pusher cluster bilgisini alalım
-      const pusherClusterMatch = html.match(/pusher[\s]*:[\s]*{[^}]*cluster[\s]*:[\s]*['"]([^'"]+)['"]/i);
-      if (pusherClusterMatch && pusherClusterMatch[1]) {
-        console.log(`Found Pusher cluster in HTML: ${pusherClusterMatch[1]}`);
-        // Bulunan cluster'ı en üste ekleyelim
-        if (!PUSHER_CONFIG.clusters.includes(pusherClusterMatch[1])) {
-          PUSHER_CONFIG.clusters.unshift(pusherClusterMatch[1]);
+      // Chatroom ID'yi çıkar
+      if (response.data && response.data.chatroom && response.data.chatroom.id) {
+        const chatroomId = response.data.chatroom.id;
+        
+        // Chatroom detaylarını yazdır
+        console.log(`\n=== CHATROOM BİLGİLERİ (API'den) ===`);
+        console.log(`🆔 Chatroom ID: ${chatroomId}`);
+        console.log(`📝 Chatroom Adı: ${response.data.chatroom.name || 'Belirtilmemiş'}`);
+        console.log(`👥 Kullanıcı Sayısı: ${response.data.chatroom.follower_count || 'Belirtilmemiş'}`);
+        console.log(`🔗 Slug: ${response.data.slug || 'Belirtilmemiş'}`);
+        
+        // Kanal hakkında ek bilgiler
+        if (response.data.user) {
+          console.log(`👤 Kanal Sahibi: ${response.data.user.username || 'Belirtilmemiş'}`);
         }
-        return { cluster: pusherClusterMatch[1] };
+        
+        console.log(`\n✅ CHATROOM ID BAŞARILI BİR ŞEKİLDE ALINDI: ${chatroomId}`);
+        return chatroomId;
       }
       
-      // Chatroom ID'yi HTML'den bulmayı deneyelim - farklı formatları kontrol edelim
-      const chatRoomPatterns = [
-        /"chatroom_id":(\d+)/,
-        /"chatroom":[^}]*"id":(\d+)/,
-        /data-chatroom-id="(\d+)"/,
-        /chatrooms\.(\d+)\.v2/
-      ];
+      // Alternatif Yöntem: Özel API bağlantısı
+      console.log(`\n⚠️ API yanıtında chatroom ID bulunamadı, alternatif yöntem deneniyor...`);
       
-      for (const pattern of chatRoomPatterns) {
-        const match = html.match(pattern);
-        if (match && match[1]) {
-          const extractedId = match[1];
-          console.log(`Found chatroom ID in HTML with pattern ${pattern}: ${extractedId}`);
-          return { chatroomId: extractedId };
-        }
-      }
-      
-      // Websocket konfigürasyonunu çıkarmayı deneyelim
-      const wsConfigMatch = html.match(/window\.ws_config\s*=\s*({[^;]+})/);
-      if (wsConfigMatch && wsConfigMatch[1]) {
-        try {
-          const wsConfig = JSON.parse(wsConfigMatch[1].replace(/'/g, '"'));
-          console.log('Found WebSocket config:', wsConfig);
-          
-          if (wsConfig.key) {
-            PUSHER_CONFIG.key = wsConfig.key;
-          }
-          
-          if (wsConfig.cluster) {
-            PUSHER_CONFIG.clusters.unshift(wsConfig.cluster);
-          }
-          
-          return wsConfig;
-        } catch (e) {
-          console.error('Failed to parse WebSocket config:', e);
-        }
-      }
-      
-      return null;
-    } catch (error) {
-      console.error('Error scraping Kick page:', error.message);
-      return null;
-    }
-  }
-
-  // Chatroomid tahmin etme - bazı durumlarda channel name'i kullanmak yeterli olabilir
-  // Ancak bu sadece bir tahmindir. Gerçek API çalışmıyorsa bu da çalışmayabilir.
-  async getChatroomId(channelName) {
-    try {
-      // 1. Alternatif: HTML sayfasını parse ederek chatroomId'yi bulmayı deneyelim
-      const kickInfo = await this.scrapeKick(channelName);
-      if (kickInfo && kickInfo.chatroomId) {
-        return kickInfo.chatroomId;
-      }
-      
-      // Eğer HTML scraping'ten cluster bilgisi aldıysak, global değişkeni güncelle
-      if (kickInfo && kickInfo.cluster) {
-        PUSHER_CONFIG.clusters.unshift(kickInfo.cluster); // Bu cluster'ı en önde dene
-        this.clusterIndex = 0; // Index'i sıfırla
-      }
-      
-      // 2. Yöntem: API'den almayı deneyelim
       try {
-        console.log('Trying API endpoint...');
-        const response = await axios.get(`https://kick.com/api/v2/channels/${channelName}`, {
+        // Web API endpoint'ini farklı formatta deneyerek
+        const altResponse = await axios.get(`https://kick.com/${channelName}/chatroom`, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': `https://kick.com/${channelName}`,
+            'Origin': 'https://kick.com'
           }
         });
         
-        if (response.data && response.data.chatroom && response.data.chatroom.id) {
-          console.log(`Successfully got chatroom ID from API: ${response.data.chatroom.id}`);
-          return response.data.chatroom.id;
+        if (altResponse.data && altResponse.data.id) {
+          const chatroomId = altResponse.data.id;
+          console.log(`✅ Alternatif API'den Chatroom ID alındı: ${chatroomId}`);
+          return chatroomId;
         }
-      } catch (apiError) {
-        console.log('Could not get chatroom ID from API');
+      } catch (altError) {
+        console.log(`Alternatif API çağrısı başarısız: ${altError.message}`);
       }
       
-      // 3. Yöntem: İyileştirilmiş tahmin - kanal adı + "chat" deneme
-      const guessedId = channelName.toLowerCase(); 
-      console.log(`Using channel name as chatroom ID: ${guessedId}`);
-      return guessedId;
+      // Doğrudan HTML sayfasını indirip içinden ID'yi çıkarmayı dene
+      console.log(`\n🔍 Doğrudan HTML sayfasından chatroom ID çıkarılmaya çalışılıyor...`);
+      
+      try {
+        const htmlResponse = await axios.get(`https://kick.com/${channelName}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html',
+            'Accept-Language': 'en-US,en;q=0.9',
+          }
+        });
+        
+        const html = htmlResponse.data;
+        
+        // HTML içinde chatroom ID'yi ara
+        const chatroomMatch = html.match(/chatrooms\.(\d+)\.v2/);
+        if (chatroomMatch && chatroomMatch[1]) {
+          const chatroomId = chatroomMatch[1];
+          console.log(`✅ HTML sayfasından Chatroom ID çıkarıldı: ${chatroomId}`);
+          return chatroomId;
+        }
+      } catch (htmlError) {
+        console.log(`HTML sayfası indirilemedi: ${htmlError.message}`);
+      }
+      
+      // Debug için tüm yanıtı göster
+      console.log(`\n⚠️ Hiçbir yöntem chatroom ID'yi bulamadı.`);
+      
+      // CloudFlare korumasını aşamadık, fallback olarak statik ID kullan
+      console.log(`\n⚠️ API istekleri CloudFlare koruması tarafından engelleniyor olabilir`);
+      console.log(`⚠️ Manuel müdahale gerekebilir. Bilinen bir kanal ID'si kullanılabilir`);
+      
+      // Eğer chatroom ID bulunamazsa hata fırlat
+      throw new Error(`API yanıtında chatroom.id bulunamadı. Kanal adı: "${channelName}"`);
     } catch (error) {
-      console.error('All chatroom ID attempts failed, using channel name:', error);
-      return channelName.toLowerCase();
+      console.error(`\n❌ HATA: "${channelName}" için chatroom ID alınamadı!`);
+      
+      // Hata durumunda daha detaylı bilgi
+      if (error.response) {
+        console.log(`⚠️ HTTP Durumu: ${error.response.status}`);
+        if (error.response.status === 403) {
+          console.log(`⚠️ CloudFlare koruması engelliyor olabilir. Tarayıcınızdan API'yi kontrol edin ve ID'yi manuel olarak girin.`);
+          console.log(`⚠️ Connect metodunda doğrudan ID kullanmak için kodu düzenleyin.`);
+        } else {
+          console.log(`⚠️ Hata detayı:`, error.response.data);
+        }
+      } else {
+        console.log(`⚠️ Hata mesajı: ${error.message}`);
+      }
+      
+      throw new Error(`"${channelName}" için chatroom ID alınamadı: ${error.message}`);
     }
   }
 
   // WebSocket bağlantısının durumunu kontrol et
   checkConnectionStatus() {
     if (this.ws) {
-      return {
+      const statusInfo = {
         readyState: this.ws.readyState,
         connected: this.connected,
-        statusText: this.connected ? 'Connected' : 'Disconnected',
+        statusText: this.connected ? 'Bağlı' : 'Bağlantı Kesildi',
         eventTypes: Array.from(this.eventTypes),
         messageCount: this.messageCounter,
         chatroomId: this.chatroomId,
@@ -480,8 +541,21 @@ class KickChatClient extends EventEmitter {
         hasMessageEvents: this.hasReceivedChatMessages(),
         lastEventTime: this.lastKeepAliveTime ? new Date(this.lastKeepAliveTime).toLocaleTimeString() : 'None'
       };
+      
+      // Durum bilgilerini konsola yazdır
+      console.log(`\n==== BAĞLANTI DURUMU ====`);
+      console.log(`📡 Kanal: ${this.channelName}`);
+      console.log(`🆔 Chatroom ID: ${this.chatroomId}`);
+      console.log(`🔌 Durum: ${statusInfo.statusText} (${statusInfo.readyStateText})`);
+      console.log(`📊 Alınan Mesaj Sayısı: ${statusInfo.messageCount}`);
+      console.log(`📋 Tespit Edilen Olay Tipleri: ${statusInfo.detectedEvents}`);
+      console.log(`⏱️ Son Olay Zamanı: ${statusInfo.lastEventTime}`);
+      console.log(`📨 Chat Mesajları Alındı: ${statusInfo.hasMessageEvents ? 'Evet' : 'Hayır'}`);
+      console.log(`=======================\n`);
+      
+      return statusInfo;
     }
-    return { connected: false, statusText: 'No WebSocket connection' };
+    return { connected: false, statusText: 'WebSocket bağlantısı yok' };
   }
 
   // WebSocket readyState durumunu okunabilir bir metne dönüştür
