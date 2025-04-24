@@ -44,7 +44,9 @@ public class SimpleKickChatMonitor : MonoBehaviour
         // Stop monitoring on destroy
         if (isMonitoring)
         {
-            StartCoroutine(StopMonitoring());
+            // Doğrudan API'yi çağır, coroutine kullanma
+            StopMonitoringDirect();
+            isMonitoring = false;
         }
     }
 
@@ -263,5 +265,27 @@ public class SimpleKickChatMonitor : MonoBehaviour
     public class MessageSender
     {
         public string username;
+    }
+
+    // Doğrudan API çağrısı yapan metot (coroutine kullanmaz)
+    private void StopMonitoringDirect()
+    {
+        try
+        {
+            string url = $"{apiBaseUrl}/unmonitor";
+            string jsonData = $"{{\"channelName\":\"{channelName}\"}}";
+            
+            // Basit bir web isteği için WebClient kullanabiliriz
+            using (var client = new System.Net.WebClient())
+            {
+                client.Headers.Add("Content-Type", "application/json");
+                client.UploadString(url, "POST", jsonData);
+                Debug.Log($"Stopped monitoring channel (direct): {channelName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"Could not cleanly stop monitoring: {ex.Message}");
+        }
     }
 } 
